@@ -1,0 +1,5 @@
+*.o
+*.d
+filescgi
+data/
+html/
