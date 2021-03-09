@@ -9,8 +9,11 @@ struct pcgrand_t;
 
 extern struct pcgrand_t localrand;
 
-// KeyGetData: returns the data for the given key
-void *KeyGetData(char *key);
+// KeyGet: returns the data for the given key
+void *KeyGet(char *key, size_t *len);
+
+// KeyDelete: deletes the key
+int KeyDelete(char *key);
 
 // KeyDoesExist: returns true if the key exists
 int KeyDoesExist(char *key);

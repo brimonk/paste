@@ -111,7 +111,7 @@ int strnullcmp(const void *a, const void *b);
 char *strornull(char *s);
 
 /* sys_readfile : reads an entire file into a memory buffer */
-char *sys_readfile(char *path);
+char *sys_readfile(char *path, size_t *len);
 
 /* mkguid : puts a guid in the buffer if it's long enough */
 int mkguid(char *buf, size_t len);
@@ -384,7 +384,7 @@ char *bstrtok(char **str, char *delim)
 }
 
 /* sys_readfile : reads an entire file into a memory buffer */
-char *sys_readfile(char *path)
+char *sys_readfile(char *path, size_t *len)
 {
 	FILE *fp;
 	s64 size;
@@ -399,6 +399,10 @@ char *sys_readfile(char *path)
 	fseek(fp, 0, SEEK_END);
 	size = ftell(fp);
 	fseek(fp, 0, SEEK_SET);
+
+	if (len != NULL) {
+		*len = size;
+	}
 
 	buf = malloc(size + 1);
 	memset(buf, 0, size + 1);

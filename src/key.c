@@ -45,14 +45,27 @@ unsigned long pcg_rand(struct pcgrand_t *rng);
 // pcg_seed : seed the random structure with some junk data
 void pcg_seed(struct pcgrand_t *rng, u64 initstate, u64 initseq);
 
-// KeyGetData: returns the data for the given key
-void *KeyGetData(char *key)
+// KeyGet: returns the data for the given key
+void *KeyGet(char *key, size_t *len)
 {
 	char buf[BUFLARGE];
 
 	KeyMakePath(buf, sizeof buf, key);
 
-	return sys_readfile(buf);
+	return sys_readfile(buf, len);
+}
+
+// KeyDelete: deletes the key
+int KeyDelete(char *key)
+{
+	char path[BUFLARGE];
+
+	if (KeyDoesExist(key)) {
+		KeyMakePath(path, sizeof path, key);
+		remove(path);
+	}
+
+	return 0;
 }
 
 // KeyDoesExist: returns true if the key exists

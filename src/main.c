@@ -56,10 +56,23 @@ enum {
 
 enum {
 	ERROR_NONE,
-	ERROR_NOKEY,
-	ERROR_ILLEGALKEY,
-	ERROR_KEYNOTFOUND,
+	ERROR_NULL_URI,
+	ERROR_ZERO_LENGTH_URI,
+	ERROR_NO_KEY_GIVEN,
+	ERROR_ILLEGAL_KEY,
+	ERROR_KEY_NOT_FOUND,
+	ERROR_POST_BADPATH,
 	ERROR_TOTAL
+};
+
+char *ERRSTRS[] = {
+	"Cannot operate correctly, no error here.\n", // ERROR_NONE
+	"Cannot operate with a NULL URI.\n", // ERROR_NULL_URI
+	"Cannot operate with a zero length URI.\n", // ERROR_ZERO_LENGTH_URI
+	"Cannot operate without a key.\n", // ERROR_NO_KEY_GIVEN
+	"Cannot operate with an illegal key.\n", // ERROR_ILLEGAL_KEY
+	"Cannot operate with a nonexistent key.\n", // ERROR_KEY_NOT_FOUND
+	"Cannot operate with this path. Use /new instead.\n", // ERROR_POST_BADPATH
 };
 
 // Request: a structure to hold everything needed for the web request
@@ -111,73 +124,42 @@ void GetRequestBody(char **s, size_t *s_len, size_t *s_cap);
 
 // Application Logic Functions
 // PerformProcessing: does the processing necessary, sets output buffers too
-int PerformProcessing(struct Response *res, struct Request *req);
+int PerformProcessing(struct Request *req);
 // PerformGet: performs the GET action
-int PerformGet(struct Response *res, struct Request *req);
-// PerformPost: creates a new file and sets the key in the response
-int PerformPost(struct Response *res, struct Request *req);
+int PerformGet(struct Request *req);
+// PerformPost: creates a new file and sends the key to the user
+int PerformPost(struct Request *req);
 // PerformPut: updates the file at the key, and returns the key
-int PerformPut(struct Response *res, struct Request *req);
+int PerformPut(struct Request *req);
 // PerformDelete: removes the item at the given key
-int PerformDelete(struct Response *res, struct Request *req);
+int PerformDelete(struct Request *req);
 
-// Response Methods
-// SendResponse: sends the response
-int SendResponse(struct Response *res);
+// SendError: sends an error response in plain text
+int SendError(int errcode);
+
+// GetKey: returns the key from the uri
+char *GetKey(char *uri);
+// CheckForKeyErrors: checks for common errors with the input uri
+int CheckForKeyErrors(char *uri);
 
 // Helper Functions
 // Bootstrap: bootstraps the program
 void Bootstrap(void);
 // CleanRequest: cleans up the request object
 void CleanRequest(struct Request *req);
-// CleanResponse: cleans up the response object
-void CleanResponse(struct Response *res);
 
 int main(int argc, char **argv)
 {
 	struct Request req;
-	struct Response res;
-	int rc;
 
 	memset(&req, 0, sizeof req);
-	memset(&res, 0, sizeof res);
 
 	Bootstrap();
 
 	while (FCGI_Accept() >= 0) {
 		CleanRequest(&req);
-		CleanResponse(&res);
-
-		rc = ParseRequest(&req);
-		if (rc < 0) {
-			printf("Error Parsing Request!");
-		}
-
-		rc = PerformProcessing(&res, &req);
-		if (rc < 0) {
-			printf("Error Processing!");
-		}
-
-		rc = SendResponse(&res);
-		if (rc < 0) {
-			printf("Error Responding!");
-		}
-	}
-
-	return 0;
-}
-
-// SendError: sends an error response in plain text
-int SendError(int errcode);
-
-// SendResponse: sends the response
-int SendResponse(struct Response *res)
-{
-	if (res->errcode == ERROR_NONE) {
-		if (res->content) // NOTE (Brian) temporary
-			printf("%s", res->content);
-	} else {
-		SendError(res->errcode);
+		ParseRequest(&req);
+		PerformProcessing(&req);
 	}
 
 	return 0;
@@ -188,16 +170,17 @@ int SendError(int errcode)
 {
 	printf("Content-type: text/plain\r\n");
 	printf("\r\n");
+	printf("%s", ERRSTRS[errcode]);
 
 	return 0;
 }
 
 // PerformProcessing: does the processing necessary, sets output buffers too
-int PerformProcessing(struct Response *res, struct Request *req)
+int PerformProcessing(struct Request *req)
 {
 	int rc;
 
-	if (req == NULL || res == NULL) {
+	if (req == NULL) {
 		return -1;
 	}
 
@@ -205,19 +188,19 @@ int PerformProcessing(struct Response *res, struct Request *req)
 
 	switch (req->Method) {
 	case METHOD_GET:
-		rc = PerformGet(res, req);
+		rc = PerformGet(req);
 		break;
 
 	case METHOD_POST:
-		rc = PerformPost(res, req);
+		rc = PerformPost(req);
 		break;
 
 	case METHOD_PUT:
-		rc = PerformPut(res, req);
+		rc = PerformPut(req);
 		break;
 
 	case METHOD_DELETE:
-		rc = PerformDelete(res, req);
+		rc = PerformDelete(req);
 		break;
 
 	default:
@@ -230,63 +213,112 @@ int PerformProcessing(struct Response *res, struct Request *req)
 }
 
 // PerformGet: retrieves the content for the key, and stores in the response
-int PerformGet(struct Response *res, struct Request *req)
+int PerformGet(struct Request *req)
 {
 	int rc;
 	char *key;
-	size_t keylen;
+	void *data;
+	size_t len;
 
 	rc = 0;
 
-	if (req->Uri == NULL) { // special case while booting up?
+	rc = CheckForKeyErrors(req->Uri);
+	if (rc != ERROR_NONE) {
+		SendError(rc);
 		return -1;
 	}
 
-	// Route: '/'
-	if (strlen(req->Uri) == 1 && req->Uri[0] == '/') {
-		res->errcode = ERROR_NOKEY;
-		return 0;
-	}
+	key = GetKey(req->Uri);
+	data = KeyGet(key, &len);
 
-	key = req->Uri + 1;
-	keylen = strlen(key);
-
-	if (KeyIsLegal(key, keylen)) {
-		if (KeyDoesExist(key)) {
-			res->content = KeyGetData(key);
-		} else {
-			res->errcode = ERROR_KEYNOTFOUND;
-		}
-	} else {
-		res->errcode = ERROR_ILLEGALKEY;
-	}
+	FCGI_fwrite(data, 1, len, stdout);
 
 	return rc;
 }
 
 // PerformPost: creates a new file and sets the key in the response
-int PerformPost(struct Response *res, struct Request *req)
+int PerformPost(struct Request *req)
 {
+	char key[BUFSMALL];
+	char path[BUFSMALL];
+
 	if (!streq(req->Uri, "/new")) {
+		SendError(ERROR_POST_BADPATH);
 		return -1;
 	}
 
-	res->content = calloc(1, KEYLEN);
-	KeyMake(res->content, KEYLEN);
+	memset(key, 0, sizeof key);
+	KeyMake(key, KEYLEN);
+
+	KeyMakePath(path, sizeof path, key);
 
 	return 0;
 }
 
 // PerformPut: updates the file at the key, and returns the key
-int PerformPut(struct Response *res, struct Request *req)
+int PerformPut(struct Request *req)
 {
 	return 0;
 }
 
 // PerformDelete: removes the item at the given key
-int PerformDelete(struct Response *res, struct Request *req)
+int PerformDelete(struct Request *req)
 {
+	char *key;
+	int rc;
+
+	rc = CheckForKeyErrors(req->Uri);
+	if (rc != ERROR_NONE) {
+		SendError(rc);
+		return -1;
+	}
+
+	key = GetKey(req->Uri);
+	rc = KeyDelete(key);
+
+	printf("Content-type: text/plain\r\n");
+	printf("\r\n");
+	printf("success\n");
+
 	return 0;
+}
+
+// GetKey: returns the key from the uri
+char *GetKey(char *uri)
+{
+	return uri + 1;
+}
+
+// CheckForKeyErrors: checks for common errors with the input uri
+int CheckForKeyErrors(char *uri)
+{
+	char *key;
+	size_t keylen;
+
+	if (uri == NULL) {
+		return ERROR_NULL_URI;
+	}
+
+	if (strlen(uri) == 0) {
+		return ERROR_ZERO_LENGTH_URI;
+	}
+
+	if (strlen(uri) == 1 && uri[0] == '/') {
+		return ERROR_NO_KEY_GIVEN;
+	}
+
+	key = uri + 1;
+	keylen = strlen(key);
+
+	if (!KeyIsLegal(key, keylen)) {
+		return ERROR_ILLEGAL_KEY;
+	}
+
+	if (!KeyDoesExist(key)) {
+		return ERROR_KEY_NOT_FOUND;
+	}
+
+	return ERROR_NONE;
 }
 
 // ParseRequest: returns a request structure
@@ -374,15 +406,6 @@ void Bootstrap(void)
 	// seed the rng machine if it hasn't been
 	pcg_seed(&localrand, time(NULL) ^ (long)printf, (unsigned long)Bootstrap);
 }
-
-// CleanResponse: cleans up the response object
-void CleanResponse(struct Response *res)
-{
-	if (res) {
-		memset(res, 0, sizeof(*res));
-	}
-}
-
 
 // CleanRequest: cleans up the request object
 void CleanRequest(struct Request *req)
