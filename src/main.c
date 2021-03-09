@@ -11,6 +11,8 @@
 #define COMMON_IMPLEMENTATION
 #include "common.h"
 
+#include "key.h"
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -18,16 +20,17 @@
 #include <fcgi_stdio.h>
 
 char *ENVVARS[] = {
-    "GATEWAY_INTERFACE",
-    "SERVER_SOFTWARE"
-    "QUERY_STRING",
     "DOCUMENT_ROOT",
+    "GATEWAY_INTERFACE",
+    "HTTPS",
     "HTTP_COOKIE",
     "HTTP_HOST",
     "HTTP_REFERER",
     "HTTP_USER_AGENT",
-    "HTTPS",
     "PATH",
+	"CONTENT_LENGTH",
+	"CONTENT_TYPE",
+    "QUERY_STRING",
     "REMOTE_ADDR",
     "REMOTE_HOST",
     "REMOTE_PORT",
@@ -39,6 +42,7 @@ char *ENVVARS[] = {
     "SERVER_ADMIN",
     "SERVER_NAME",
     "SERVER_PORT",
+    "SERVER_SOFTWARE"
 };
 
 enum {
@@ -50,15 +54,31 @@ enum {
 	METHOD_TOTAL
 };
 
-// WebRequest: a structure to hold everything needed for the web request
-struct WebRequest {
+enum {
+	ERROR_NONE,
+	ERROR_NOKEY,
+	ERROR_ILLEGALKEY,
+	ERROR_KEYNOTFOUND,
+	ERROR_TOTAL
+};
+
+// Request: a structure to hold everything needed for the web request
+struct Request {
 	int Method;
 
 	char *Uri;
 
+	s64 ContentLen;
+	char *ContentType;
+
 	char *Body;
 	size_t BodyLen;
 	size_t BodyCap;
+};
+
+struct Response {
+	void *content;
+	int errcode;
 };
 
 // printallenv : prints all of the env vars
@@ -68,7 +88,7 @@ void printallenv(void)
 	char *s;
 	int i;
 
-	format = "<p>%s : <strong>%s</strong></p>";
+	format = "%s : %s\n";
 
 	for (i = 0; i < ARRSIZE(ENVVARS); i++) {
 		s = getenv(ENVVARS[i]);
@@ -83,75 +103,220 @@ void printallenv(void)
 
 // Request Methods
 // ParseRequest: returns a request structure
-int ParseRequest(struct WebRequest *wr);
+int ParseRequest(struct Request *req);
 // ParseMethod: returns the enum for the request method
 int ParseMethod(char *request);
 // GetRequestBody: gets the request body, if there is one
 void GetRequestBody(char **s, size_t *s_len, size_t *s_cap);
 
+// Application Logic Functions
+// PerformProcessing: does the processing necessary, sets output buffers too
+int PerformProcessing(struct Response *res, struct Request *req);
+// PerformGet: performs the GET action
+int PerformGet(struct Response *res, struct Request *req);
+// PerformPost: creates a new file and sets the key in the response
+int PerformPost(struct Response *res, struct Request *req);
+// PerformPut: updates the file at the key, and returns the key
+int PerformPut(struct Response *res, struct Request *req);
+// PerformDelete: removes the item at the given key
+int PerformDelete(struct Response *res, struct Request *req);
+
 // Response Methods
 // SendResponse: sends the response
-int SendResponse(struct WebRequest *wr);
+int SendResponse(struct Response *res);
 
 // Helper Functions
 // Bootstrap: bootstraps the program
 void Bootstrap(void);
 // CleanRequest: cleans up the request object
-void CleanRequest(struct WebRequest *wr);
+void CleanRequest(struct Request *req);
+// CleanResponse: cleans up the response object
+void CleanResponse(struct Response *res);
 
 int main(int argc, char **argv)
 {
-	struct WebRequest wr;
+	struct Request req;
+	struct Response res;
 	int rc;
+
+	memset(&req, 0, sizeof req);
+	memset(&res, 0, sizeof res);
 
 	Bootstrap();
 
 	while (FCGI_Accept() >= 0) {
-		rc = ParseRequest(&wr);
+		CleanRequest(&req);
+		CleanResponse(&res);
+
+		rc = ParseRequest(&req);
 		if (rc < 0) {
-			printf("ERROR!");
+			printf("Error Parsing Request!");
 		}
 
-		SendResponse(&wr);
+		rc = PerformProcessing(&res, &req);
 		if (rc < 0) {
-			printf("ERROR!");
+			printf("Error Processing!");
 		}
 
-		CleanRequest(&wr);
+		rc = SendResponse(&res);
+		if (rc < 0) {
+			printf("Error Responding!");
+		}
 	}
 
 	return 0;
 }
 
+// SendError: sends an error response in plain text
+int SendError(int errcode);
+
 // SendResponse: sends the response
-int SendResponse(struct WebRequest *wr)
+int SendResponse(struct Response *res)
+{
+	if (res->errcode == ERROR_NONE) {
+		if (res->content) // NOTE (Brian) temporary
+			printf("%s", res->content);
+	} else {
+		SendError(res->errcode);
+	}
+
+	return 0;
+}
+
+// SendError: sends an error response in plain text
+int SendError(int errcode)
 {
 	printf("Content-type: text/plain\r\n");
-
 	printf("\r\n");
 
-	printf("Hello World!");
+	return 0;
+}
 
-	if (wr->Body)
-		printf("%s", wr->Body);
+// PerformProcessing: does the processing necessary, sets output buffers too
+int PerformProcessing(struct Response *res, struct Request *req)
+{
+	int rc;
 
+	if (req == NULL || res == NULL) {
+		return -1;
+	}
+
+	rc = 0;
+
+	switch (req->Method) {
+	case METHOD_GET:
+		rc = PerformGet(res, req);
+		break;
+
+	case METHOD_POST:
+		rc = PerformPost(res, req);
+		break;
+
+	case METHOD_PUT:
+		rc = PerformPut(res, req);
+		break;
+
+	case METHOD_DELETE:
+		rc = PerformDelete(res, req);
+		break;
+
+	default:
+	case METHOD_UNDEFINED:
+		rc = -1;
+		break;
+	}
+
+	return rc;
+}
+
+// PerformGet: retrieves the content for the key, and stores in the response
+int PerformGet(struct Response *res, struct Request *req)
+{
+	int rc;
+	char *key;
+	size_t keylen;
+
+	rc = 0;
+
+	if (req->Uri == NULL) { // special case while booting up?
+		return -1;
+	}
+
+	// Route: '/'
+	if (strlen(req->Uri) == 1 && req->Uri[0] == '/') {
+		res->errcode = ERROR_NOKEY;
+		return 0;
+	}
+
+	key = req->Uri + 1;
+	keylen = strlen(key);
+
+	if (KeyIsLegal(key, keylen)) {
+		if (KeyDoesExist(key)) {
+			res->content = KeyGetData(key);
+		} else {
+			res->errcode = ERROR_KEYNOTFOUND;
+		}
+	} else {
+		res->errcode = ERROR_ILLEGALKEY;
+	}
+
+	return rc;
+}
+
+// PerformPost: creates a new file and sets the key in the response
+int PerformPost(struct Response *res, struct Request *req)
+{
+	if (!streq(req->Uri, "/new")) {
+		return -1;
+	}
+
+	res->content = calloc(1, KEYLEN);
+	KeyMake(res->content, KEYLEN);
+
+	return 0;
+}
+
+// PerformPut: updates the file at the key, and returns the key
+int PerformPut(struct Response *res, struct Request *req)
+{
+	return 0;
+}
+
+// PerformDelete: removes the item at the given key
+int PerformDelete(struct Response *res, struct Request *req)
+{
 	return 0;
 }
 
 // ParseRequest: returns a request structure
-int ParseRequest(struct WebRequest *wr)
+int ParseRequest(struct Request *req)
 {
-	memset(wr, 0, sizeof(*wr));
+	char *s;
 
-	if (getenv("REQUEST_METHOD") != NULL) {
-		wr->Method = ParseMethod(getenv("REQUEST_METHOD"));
+	memset(req, 0, sizeof(*req));
+
+	s = getenv("REQUEST_METHOD");
+	if (s) {
+		req->Method = ParseMethod(s);
 	}
 
-	if (getenv("REQUEST_URI") != NULL) {
-		wr->Uri = strdup(getenv("REQUEST_URI"));
+	s = getenv("REQUEST_URI");
+	if (s) {
+		req->Uri = strdup(s);
 	}
 
-	GetRequestBody(&wr->Body, &wr->BodyLen, &wr->BodyCap);
+	s = getenv("CONTENT_TYPE");
+	if (s) {
+		req->ContentType = strdup(s);
+	}
+
+	s = getenv("CONTENT_LENGTH");
+	if (s) {
+		req->ContentLen = atoll(s);
+	}
+
+	GetRequestBody(&req->Body, &req->BodyLen, &req->BodyCap);
 
 	return 0;
 }
@@ -201,20 +366,32 @@ void Bootstrap(void)
 	int rc;
 
 	// create a directory to store all of the junk
-	rc = mkdir("./data", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	rc = mkdir(DATADIR, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 	if (rc < 0) {
 		perror(strerror(rc));
 	}
+
+	// seed the rng machine if it hasn't been
+	pcg_seed(&localrand, time(NULL) ^ (long)printf, (unsigned long)Bootstrap);
 }
 
-// CleanRequest: cleans up the request object
-void CleanRequest(struct WebRequest *wr)
+// CleanResponse: cleans up the response object
+void CleanResponse(struct Response *res)
 {
-	if (wr) {
-		free(wr->Uri);
-		free(wr->Body);
+	if (res) {
+		memset(res, 0, sizeof(*res));
+	}
+}
 
-		memset(wr, 0, sizeof(*wr));
+
+// CleanRequest: cleans up the request object
+void CleanRequest(struct Request *req)
+{
+	if (req) {
+		free(req->Uri);
+		free(req->Body);
+
+		memset(req, 0, sizeof(*req));
 	}
 }
 
