@@ -55,6 +55,21 @@ void *KeyGet(char *key, size_t *len)
 	return sys_readfile(buf, len);
 }
 
+// KeyWrite: writes the key
+int KeyWrite(char *key, void *data, size_t len)
+{
+	char path[BUFLARGE];
+	FILE *fp;
+
+	KeyMakePath(path, sizeof path, key);
+
+	fp = fopen(path, "wb");
+	fwrite(data, 1, len, fp);
+	fclose(fp);
+
+	return 0;
+}
+
 // KeyDelete: deletes the key
 int KeyDelete(char *key)
 {

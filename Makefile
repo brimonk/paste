@@ -1,5 +1,5 @@
 CC=cc
-LINKER=-ldl -lm -lfcgi
+LINKER=-ldl -lm -lfcgi -lmagic
 FLAGS=-Wall -g3 -march=native
 TARGET=./filescgi
 SRC=$(wildcard src/*.c)

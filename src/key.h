@@ -12,6 +12,9 @@ extern struct pcgrand_t localrand;
 // KeyGet: returns the data for the given key
 void *KeyGet(char *key, size_t *len);
 
+// KeyWrite: writes the key
+int KeyWrite(char *key, void *data, size_t len);
+
 // KeyDelete: deletes the key
 int KeyDelete(char *key);
 

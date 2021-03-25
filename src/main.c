@@ -19,6 +19,10 @@
 
 #include <fcgi_stdio.h>
 
+#include <magic.h>
+
+static magic_t MAGIC_COOKIE;
+
 char *ENVVARS[] = {
     "DOCUMENT_ROOT",
     "GATEWAY_INTERFACE",
@@ -72,7 +76,7 @@ char *ERRSTRS[] = {
 	"Cannot operate without a key.\n", // ERROR_NO_KEY_GIVEN
 	"Cannot operate with an illegal key.\n", // ERROR_ILLEGAL_KEY
 	"Cannot operate with a nonexistent key.\n", // ERROR_KEY_NOT_FOUND
-	"Cannot operate with this path. Use /new instead.\n", // ERROR_POST_BADPATH
+	"Cannot operate with this path. Use /upload instead.\n", // ERROR_POST_BADPATH
 };
 
 // Request: a structure to hold everything needed for the web request
@@ -85,34 +89,11 @@ struct Request {
 	char *ContentType;
 
 	char *Body;
-	size_t BodyLen;
-	size_t BodyCap;
+	// size_t BodyLen;
+	// size_t BodyCap;
+
+	char *Host;
 };
-
-struct Response {
-	void *content;
-	int errcode;
-};
-
-// printallenv : prints all of the env vars
-void printallenv(void)
-{
-	char *format;
-	char *s;
-	int i;
-
-	format = "%s : %s\n";
-
-	for (i = 0; i < ARRSIZE(ENVVARS); i++) {
-		s = getenv(ENVVARS[i]);
-
-		if (s) {
-			printf(format, ENVVARS[i], s);
-		} else {
-			printf(format, ENVVARS[i], "(NULL)");
-		}
-	}
-}
 
 // Request Methods
 // ParseRequest: returns a request structure
@@ -120,7 +101,7 @@ int ParseRequest(struct Request *req);
 // ParseMethod: returns the enum for the request method
 int ParseMethod(char *request);
 // GetRequestBody: gets the request body, if there is one
-void GetRequestBody(char **s, size_t *s_len, size_t *s_cap);
+void *GetRequestBody(size_t bytes);
 
 // Application Logic Functions
 // PerformProcessing: does the processing necessary, sets output buffers too
@@ -231,6 +212,10 @@ int PerformGet(struct Request *req)
 	key = GetKey(req->Uri);
 	data = KeyGet(key, &len);
 
+	printf("Content-Length: %ld\r\n", len);
+	printf("Content-Type: %s\r\n", magic_buffer(MAGIC_COOKIE, data, len));
+	printf("\r\n");
+
 	FCGI_fwrite(data, 1, len, stdout);
 
 	return rc;
@@ -240,17 +225,21 @@ int PerformGet(struct Request *req)
 int PerformPost(struct Request *req)
 {
 	char key[BUFSMALL];
-	char path[BUFSMALL];
 
-	if (!streq(req->Uri, "/new")) {
+	if (!streq(req->Uri, "/upload")) {
 		SendError(ERROR_POST_BADPATH);
 		return -1;
 	}
 
 	memset(key, 0, sizeof key);
+
 	KeyMake(key, KEYLEN);
 
-	KeyMakePath(path, sizeof path, key);
+	KeyWrite(key, req->Body, req->ContentLen);
+
+	printf("Content-Type: text/plain\r\n");
+	printf("\r\n");
+	printf("https://%s/%s\n", req->Host, key);
 
 	return 0;
 }
@@ -258,6 +247,24 @@ int PerformPost(struct Request *req)
 // PerformPut: updates the file at the key, and returns the key
 int PerformPut(struct Request *req)
 {
+	char *key;
+	int rc;
+
+	rc = CheckForKeyErrors(req->Uri);
+	if (rc != ERROR_NONE) {
+		SendError(rc);
+		return -1;
+	}
+
+	key = GetKey(req->Uri);
+
+	KeyDelete(key);
+	KeyWrite(key, req->Body, req->ContentLen);
+
+	printf("Content-Type: text/plain\r\n");
+	printf("\r\n");
+	printf("https://%s/%s\n", req->Host, key);
+
 	return 0;
 }
 
@@ -276,7 +283,7 @@ int PerformDelete(struct Request *req)
 	key = GetKey(req->Uri);
 	rc = KeyDelete(key);
 
-	printf("Content-type: text/plain\r\n");
+	printf("Content-Type: text/plain\r\n");
 	printf("\r\n");
 	printf("success\n");
 
@@ -348,7 +355,12 @@ int ParseRequest(struct Request *req)
 		req->ContentLen = atoll(s);
 	}
 
-	GetRequestBody(&req->Body, &req->BodyLen, &req->BodyCap);
+	s = getenv("HTTP_HOST");
+	if (s) {
+		req->Host = strdup(s);
+	}
+
+	req->Body = GetRequestBody(req->ContentLen);
 
 	return 0;
 }
@@ -375,21 +387,14 @@ int ParseMethod(char *request)
 }
 
 // GetRequestBody: gets the request body, if there is one
-void GetRequestBody(char **s, size_t *s_len, size_t *s_cap)
+void *GetRequestBody(size_t bytes)
 {
-	int i, c;
+	void *p;
 
-	*s = NULL;
-	*s_len = *s_cap = 0;
+	p = calloc(1, bytes);
+	FCGI_fread(p, 1, bytes, FCGI_stdin);
 
-	for (i = 0; (c = getc(FCGI_stdin)) != EOF && i < (1 << 20 << 2); i++) {
-		c_resize(s, s_len, s_cap, sizeof(**s));
-		(*s)[i] = (char)c;
-	}
-
-	if (s && *s && i != 0) {
-		(*s)[i] = 0;
-	}
+	return p;
 }
 
 // Bootstrap: bootstraps the program
@@ -405,6 +410,18 @@ void Bootstrap(void)
 
 	// seed the rng machine if it hasn't been
 	pcg_seed(&localrand, time(NULL) ^ (long)printf, (unsigned long)Bootstrap);
+
+	// setup libmagic
+	MAGIC_COOKIE = magic_open(MAGIC_MIME);
+	if (MAGIC_COOKIE == NULL) {
+		fprintf(stderr, "%s", magic_error(MAGIC_COOKIE));
+		exit(1);
+	}
+
+	if (magic_load(MAGIC_COOKIE, NULL) != 0) {
+		fprintf(stderr, "cannot load magic database - %s\n", magic_error(MAGIC_COOKIE));
+		magic_close(MAGIC_COOKIE);
+	}
 }
 
 // CleanRequest: cleans up the request object
