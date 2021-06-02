@@ -9,6 +9,7 @@ create table if not exists pastes
       id         text default (uuid())
     , ts         text default (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
     , remote     text null
+    , mime_type  text null
     , data       blob not null
 );
 
