@@ -136,11 +136,6 @@ void request_handler(struct http_request_s *req)
 
 		http_respond(req, res);
 
-		rc = send_paste(req, res, id);
-		if (rc < 0) {
-			send_error_internal(req, res);
-		}
-
 		free(id);
 	} else {
 		send_error_internal(req, res);
@@ -187,9 +182,9 @@ int add_paste(char **id, void *blob, size_t len)
 
 	rc = sqlite3_step(stmt);
 
-	rowid = sqlite3_last_insert_rowid(db);
-
 	sqlite3_finalize(stmt);
+
+	rowid = sqlite3_last_insert_rowid(db);
 
 	// then we do the select
 	rc = sqlite3_prepare_v2(db, ADD_SELECT_SQL, -1, &stmt, (const char **)&err);
@@ -229,6 +224,9 @@ int send_root(struct http_request_s *req, struct http_response_s *res)
 // send_error_internal: sends the root webpage (has instructions)
 int send_error_internal(struct http_request_s *req, struct http_response_s *res)
 {
+	http_response_status(res, 503);
+	http_respond(req, res);
+
 	return 0;
 }
 
@@ -267,7 +265,7 @@ int get_paste(char *id, void **blob, size_t *len)
 		return -1;
 	}
 
-#define GET_SQL ("select data from pastes where id = '?';")
+#define GET_SQL ("select data from pastes where id = ?;")
 
 	rc = sqlite3_prepare_v2(db, GET_SQL, -1, &stmt, (const char **)&err);
 	if (rc != SQLITE_OK) {
@@ -277,11 +275,17 @@ int get_paste(char *id, void **blob, size_t *len)
 	}
 
 	rc = sqlite3_bind_text(stmt, 1, id, strlen(id), NULL);
+	if (rc != SQLITE_OK) {
+		SQLITE_ERRMSG(rc);
+		sqlite3_finalize(stmt);
+		return -1;
+	}
 
 	rc = sqlite3_step(stmt);
 
 	// TODO (brian) reasonably check for errors
 
+	sqlite3_column_blob(stmt, 0);
 	*len = sqlite3_column_bytes(stmt, 0);
 	*blob = calloc(*len, 1);
 	tblob = sqlite3_column_blob(stmt, 0);
