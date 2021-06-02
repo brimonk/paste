@@ -1,5 +1,7 @@
 *.o
 *.d
-filescgi
-data/
-html/
+*.db
+*.so
+paste
+
+.gdb*

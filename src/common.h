@@ -152,6 +152,18 @@ char *strdup_null(char *s);
 // strslice : returns a copy of the string starting at s + n chars, and going for at most j
 char *strslice(char *s, s32 n, s32 j);
 
+struct pcgrand_t {
+	u64 state;
+	u64 inc;
+	s32 init;
+};
+
+// RNG FUNCTIONS
+// pcg_rand : get a random num from the pcgrand state
+unsigned long pcg_rand(struct pcgrand_t *rng);
+// pcg_seed : seed the random structure with some junk data
+void pcg_seed(struct pcgrand_t *rng, u64 initstate, u64 initseq);
+
 /* c_fprintf : common printf logging routine, with some extra pizzaz */
 int c_fprintf(char *file, int line, const char *func, int level, FILE *fp, char *fmt, ...);
 
@@ -577,6 +589,38 @@ int c_fprintf(char *file, int line, const char *func, int level, FILE *fp, char 
 	va_end(args); /* cleanup stack arguments */
 
 	return rc;
+}
+
+struct pcgrand_t localrand = {0};
+
+// pcg_rand : get a random num from the pcgrand state
+unsigned long pcg_rand(struct pcgrand_t *rng)
+{
+	unsigned long old;
+	unsigned int xorshift, rot;
+
+	old = rng->state;
+
+	/* advance internal state */
+	rng->state = old * 6364136223846793005ULL + (rng->inc | 1);
+
+	/* calculate output function (XSH RR), uses old state for max ILP */
+	xorshift = ((old >> 18u) ^ old) >> 27u;
+	rot = old >> 59u;
+
+	return (xorshift >> rot) | (xorshift << ((-rot) & 31));
+}
+
+// pcg_seed : seed the random structure with some junk data
+void pcg_seed(struct pcgrand_t *rng, u64 initstate, u64 initseq)
+{
+	if (rng->init) return;
+
+    rng->state = 0U;
+    rng->inc = (initseq << 1u) | 1u;
+    pcg_rand(rng);
+    rng->state += initstate;
+    pcg_rand(rng);
 }
 
 #endif // COMMON_IMPLEMENTATION
