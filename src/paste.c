@@ -370,12 +370,14 @@ void init(char *db_file_name, char *sql_file_name)
 		exit(1);
 	}
 
+#if 0
 #define SQL_WAL_ENABLE ("PRAGMA journal_mode=WAL;")
 	rc = sqlite3_exec(db, SQL_WAL_ENABLE, NULL, NULL, (char **)&err);
 	if (rc != SQLITE_OK) {
 		SQLITE_ERRMSG(rc);
 		exit(1);
 	}
+#endif
 }
 
 // cleanup: cleans up for a shutdown (probably doesn't ever happen)

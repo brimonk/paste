@@ -10,7 +10,8 @@
 ADDR="http://localhost"
 PORT=5000
 
-LIMIT=100
+LIMIT=5000
+BATCH=100
 
 DATADIR=$(mktemp -d -t paste-XXXXXXXX)
 
@@ -30,13 +31,13 @@ function mk_testdata
 # upload_testdata: uploads test data
 function upload_testdata
 {
-	cat "$1" | curl --silent --output "$2" --data-binary @- "$ADDR:$PORT"
+	cat "$1" | curl --silent --data-binary @- "$ADDR:$PORT" > "$2"
 }
 
 # get_testdata: fetches test data for comparison
 function get_testdata
 {
-	curl --silent --output "$2.rdat" "$1"
+	curl --silent --output "$2" "$1"
 }
 
 # blob_compare: compares the two blobs
@@ -49,41 +50,27 @@ function blob_compare
 function single_paste
 {
 	BASENAME=$(get_barename $1)
-	mk_testdata $BASENAME
+
+	mk_testdata "$BASENAME.dat"
+
 	upload_testdata "$BASENAME.dat" "$BASENAME.url"
+
 	URL=$(cat "$BASENAME.url")
+
+	echo -e "$1\t$URL"
+
 	get_testdata "$URL" "$BASENAME.rdat"
+
 	blob_compare "$BASENAME.dat" "$BASENAME.rdat"
 }
 
-# make all of the data
-for i in $(seq 1 1 $LIMIT); do
-	mk_testdata $i &
+for i in $(seq 0 $BATCH $((LIMIT - 1))); do
+	for j in $(seq $i 1 $(($i + $BATCH - 1))); do
+		single_paste $j &
+	done
+
+	wait $(jobs -rp)
 done
-
-echo $(jobs -rp)
-
-wait $(jobs -rp)
-
-# # paste all of the pastes
-# for f in $(find "$DATADIR" -name "blob*.dat"); do
-# 	NAKED=${f%.dat}
-# 	upload_testdata "$NAKED"
-# done
-# 
-# # now, for every url, do a GET on that url
-# for f in $(find "$DATADIR" -name "blob*.url"); do
-# 	URL=$(cat $f)
-# 	NAKED="${f%.url}"
-# 	get_testdata "$URL" "$NAKED"
-# done
-# 
-# # then, compare all of them
-# for f in $(find "$DATADIR" -name "blob*.dat"); do
-# 	NAKED="${f%.dat}"
-# 	cmp -l "$NAKED.dat" "$NAKED.rdat" \
-# 		| gawk '{printf "%08X %02X %02X\n", $1, strtonum(0$2), strtonum(0$3)}'
-# done
 
 rm -rf "$DATADIR"
 
