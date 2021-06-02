@@ -329,6 +329,7 @@ int is_uuid(char *id)
 void init(char *db_file_name, char *sql_file_name)
 {
 	int rc;
+	char *err;
 
 	// seed the rng machine if it hasn't been
 	pcg_seed(&localrand, time(NULL) ^ (long)printf, (unsigned long)init);
@@ -366,6 +367,13 @@ void init(char *db_file_name, char *sql_file_name)
 	rc = create_tables(db, sql_file_name);
 	if (rc < 0) {
 		ERR("Critical error in creating sql tables!!\n");
+		exit(1);
+	}
+
+#define SQL_WAL_ENABLE ("PRAGMA journal_mode=WAL;")
+	rc = sqlite3_exec(db, SQL_WAL_ENABLE, NULL, NULL, (char **)&err);
+	if (rc != SQLITE_OK) {
+		SQLITE_ERRMSG(rc);
 		exit(1);
 	}
 }

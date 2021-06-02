@@ -31,5 +31,5 @@ clean-obj:
 	rm -f $(OBJ) $(DEP)
 	
 clean-bin:
-	rm -f $(shell find . -maxdepth 1 -executable -type f)
+	rm -f $(TARGET) ext_uuid.so
 
