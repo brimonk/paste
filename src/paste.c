@@ -53,12 +53,12 @@ int send_error_internal(struct http_request_s *req, struct http_response_s *res)
 
 void test(void)
 {
-	int i, rc;
+	int i;
 	char *err;
 
 	for (i = 0; i < 100; i++) {
 #define TEST_SQL ("insert into pastes (data) values ((randomblob(32)));")
-		rc = sqlite3_exec(db, TEST_SQL, NULL, NULL, &err);
+		sqlite3_exec(db, TEST_SQL, NULL, NULL, &err);
 	}
 
 	printf("%d\n", is_uuid("56ac4f6d-084f-4a45-8353-bbf59d872a68"));
@@ -67,7 +67,6 @@ void test(void)
 int main(int argc, char **argv)
 {
 	struct http_server_s *server;
-	int rc;
 
 	if (argc < 2) {
 		fprintf(stderr, USAGE, argv[0]);
@@ -82,7 +81,7 @@ int main(int argc, char **argv)
 
 	// test();
 
-	rc = http_server_listen(server);
+	http_server_listen(server);
 
 	cleanup();
 
@@ -236,14 +235,20 @@ int send_paste(struct http_request_s *req, struct http_response_s *res, char *id
 	void *blob;
 	size_t len;
 	int rc;
+	char slen[32];
+	char type[BUFSMALL];
 
 	rc = get_paste(id, &blob, &len);
 	if (rc < 0) {
 		return rc;
 	}
 
+	snprintf(slen, sizeof slen, "%ld", len);
+	snprintf(type, sizeof type, "%s", magic_buffer(MAGIC_COOKIE, blob, len));
+
 	http_response_status(res, 200);
-	http_response_header(res, "Content-Type", "plain/text");
+	http_response_header(res, "Content-Length", slen);
+	http_response_header(res, "Content-Type", "text/plain");
 	http_response_body(res, blob, len);
 
 	http_respond(req, res);
@@ -329,7 +334,6 @@ int is_uuid(char *id)
 void init(char *db_file_name, char *sql_file_name)
 {
 	int rc;
-	char *err;
 
 	// seed the rng machine if it hasn't been
 	pcg_seed(&localrand, time(NULL) ^ (long)printf, (unsigned long)init);
@@ -371,6 +375,7 @@ void init(char *db_file_name, char *sql_file_name)
 	}
 
 #if 0
+	char *err;
 #define SQL_WAL_ENABLE ("PRAGMA journal_mode=WAL;")
 	rc = sqlite3_exec(db, SQL_WAL_ENABLE, NULL, NULL, (char **)&err);
 	if (rc != SQLITE_OK) {
