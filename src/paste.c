@@ -94,7 +94,9 @@ void request_handler(struct http_request_s *req)
 	struct http_response_s *res;
 	struct http_string_s m, t;
 	struct http_string_s body;
+	struct http_string_s h;
 	char *method, *target;
+	char *host;
 	char *id;
 	int rc;
 	char tbuf[BUFSMALL];
@@ -103,10 +105,12 @@ void request_handler(struct http_request_s *req)
 
 	m = http_request_method(req);
 	t = http_request_target(req);
+	h = http_request_header(req, "Host");
 	body = http_request_body(req);
 
 	method = strndup(m.buf, m.len);
 	target = strndup(t.buf, t.len);
+	host   = strndup(h.buf, h.len);
 
 	if (streq(method, "GET")) {
 		if (is_uuid(target + 1)) { // getting a paste
@@ -129,7 +133,7 @@ void request_handler(struct http_request_s *req)
 		http_response_status(res, 200);
 		http_response_header(res, "Content-Type", "plain/text");
 
-		snprintf(tbuf, sizeof tbuf, "http://localhost:%d/%s\n", PORT, id);
+		snprintf(tbuf, sizeof tbuf, "http://%s:%d/%s\n", host, PORT, id);
 
 		http_response_body(res, tbuf, strlen(tbuf));
 
@@ -140,9 +144,7 @@ void request_handler(struct http_request_s *req)
 		send_error_internal(req, res);
 	}
 
-
-	// just a small test
-
+	free(host);
 	free(target);
 	free(method);
 }
