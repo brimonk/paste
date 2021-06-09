@@ -1,9 +1,13 @@
-/*
- * Brian Chrzanowski
- * 2021-03-07 02:05:23
- *
- * my pastebin, with a small, static, instructional webpage
- */
+// Brian Chrzanowski
+// 2021-06-08 20:04:01
+//
+// my pastebin, with a small, static, instructional webpage
+//
+// TODO (Brian)
+// 1. create a small, static, instructional page
+// 2. small favicon
+// 3. steal the css from my website and ship it with this (can I just link to it?)
+// 4. make a 'serve_file' function, that'll serve a static file, or send an error
 
 #define COMMON_IMPLEMENTATION
 #include "common.h"
@@ -42,32 +46,18 @@ int send_paste(struct http_request_s *req, struct http_response_s *res, char *id
 int add_paste(char **id, void *blob, size_t len);
 // get_paste: loads the entire blob into memory
 int get_paste(char *id, void **blob, size_t *len);
-// send_root: sends the root webpage (has instructions)
-int send_root(struct http_request_s *req, struct http_response_s *res);
-// send_error_internal: sends the root webpage (has instructions)
-int send_error_internal(struct http_request_s *req, struct http_response_s *res);
+// send_file: sends the file in the request, coalescing to '/index.html' from "html/"
+int send_file(struct http_request_s *req, struct http_response_s *res);
+// send_error: sends an error
+int send_error(struct http_request_s *req, struct http_response_s *res, int errcode);
 
 #define SQLITE_ERRMSG(x) (fprintf(stderr, "Error: %s\n", sqlite3_errstr(rc)))
 
 #define USAGE ("USAGE: %s <dbname>\n")
 
-void test(void)
-{
-	int i, rc;
-	char *err;
-
-	for (i = 0; i < 100; i++) {
-#define TEST_SQL ("insert into pastes (data) values ((randomblob(32)));")
-		rc = sqlite3_exec(db, TEST_SQL, NULL, NULL, &err);
-	}
-
-	printf("%d\n", is_uuid("56ac4f6d-084f-4a45-8353-bbf59d872a68"));
-}
-
 int main(int argc, char **argv)
 {
 	struct http_server_s *server;
-	int rc;
 
 	if (argc < 2) {
 		fprintf(stderr, USAGE, argv[0]);
@@ -80,9 +70,7 @@ int main(int argc, char **argv)
 
 	printf("listening on http://localhost:%d\n", PORT);
 
-	// test();
-
-	rc = http_server_listen(server);
+	http_server_listen(server);
 
 	cleanup();
 
@@ -113,18 +101,20 @@ void request_handler(struct http_request_s *req)
 		if (is_uuid(target + 1)) { // getting a paste
 			rc = send_paste(req, res, target + 1);
 			if (rc < 0) {
-				send_error_internal(req, res);
+				send_error(req, res, 503);
+			}
+		} else if (strlen(target) == 1) {
+			rc = send_file(req, res);
+			if (rc < 0) {
+				send_error(req, res, 503);
 			}
 		} else {
-			rc = send_root(req, res);
-			if (rc < 0) {
-				send_error_internal(req, res);
-			}
+			send_error(req, res, 404);
 		}
 	} else if (streq(method, "POST")) {
 		rc = add_paste(&id, (void *)body.buf, body.len);
 		if (rc < 0) {
-			send_error_internal(req, res);
+			send_error(req, res, 503);
 		}
 
 		http_response_status(res, 200);
@@ -138,7 +128,7 @@ void request_handler(struct http_request_s *req)
 
 		free(id);
 	} else {
-		send_error_internal(req, res);
+		send_error(req, res, 404);
 	}
 
 
@@ -215,16 +205,50 @@ int add_paste(char **id, void *blob, size_t len)
 	return 0;
 }
 
-// send_root: sends the root webpage (has instructions)
-int send_root(struct http_request_s *req, struct http_response_s *res)
+// send_file: sends the file in the request, coalescing to '/index.html' from "html/"
+int send_file(struct http_request_s *req, struct http_response_s *res)
 {
+	struct http_string_s t;
+	char *target;
+	char *s;
+	char bbuf[BUFLARGE];
+
+	t = http_request_target(req);
+
+	target = strndup(t.buf, t.len);
+
+	s = strstr(target, "..");
+	if (s) { // check for people being naughty?
+		free(target);
+		return -1;
+	}
+
+	snprintf(bbuf, sizeof bbuf, "html/%s", target + 1);
+
+	printf("accessing file: %s\n", bbuf);
+
+	if (access(bbuf, F_OK) == 0) {
+		char *file_data;
+		file_data = sys_readfile(bbuf, NULL);
+
+		http_response_status(res, 200);
+		http_response_header(res, "Content-Type", "plain/text");
+		http_response_body(res, blob, len);
+
+		http_respond(req, res);
+	} else {
+		send_error(req, res, 404);
+	}
+
+	free(target);
+
 	return 0;
 }
 
-// send_error_internal: sends the root webpage (has instructions)
-int send_error_internal(struct http_request_s *req, struct http_response_s *res)
+// send_error: sends an error
+int send_error(struct http_request_s *req, struct http_response_s *res, int errcode)
 {
-	http_response_status(res, 503);
+	http_response_status(res, errcode);
 	http_respond(req, res);
 
 	return 0;
@@ -329,7 +353,6 @@ int is_uuid(char *id)
 void init(char *db_file_name, char *sql_file_name)
 {
 	int rc;
-	char *err;
 
 	// seed the rng machine if it hasn't been
 	pcg_seed(&localrand, time(NULL) ^ (long)printf, (unsigned long)init);
@@ -372,6 +395,7 @@ void init(char *db_file_name, char *sql_file_name)
 
 #if 0
 #define SQL_WAL_ENABLE ("PRAGMA journal_mode=WAL;")
+	char *err;
 	rc = sqlite3_exec(db, SQL_WAL_ENABLE, NULL, NULL, (char **)&err);
 	if (rc != SQLITE_OK) {
 		SQLITE_ERRMSG(rc);
