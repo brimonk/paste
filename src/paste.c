@@ -107,24 +107,22 @@ void request_handler(struct http_request_s *req)
 			if (rc < 0) {
 				send_error(req, res, 503);
 			}
-		} else if (strlen(target) == 1) {
+		} else {
 			rc = send_file(req, res);
 			if (rc < 0) {
-				send_error(req, res, 503);
+				send_error(req, res, 404);
 			}
-		} else {
-			send_error(req, res, 404);
 		}
-	} else if (streq(method, "POST")) {
+	} else if (streq(method, "POST") && streq(target, "/upload")) {
 		rc = add_paste(&id, (void *)body.buf, body.len);
 		if (rc < 0) {
 			send_error(req, res, 503);
 		}
 
 		http_response_status(res, 200);
-		http_response_header(res, "Content-Type", "plain/text");
+		http_response_header(res, "Content-Type", "text/plain");
 
-		snprintf(tbuf, sizeof tbuf, "http://%s:%d/%s\n", host, PORT, id);
+		snprintf(tbuf, sizeof tbuf, "http://%s/%s\n", host, id);
 
 		http_response_body(res, tbuf, strlen(tbuf));
 
@@ -211,31 +209,47 @@ int add_paste(char **id, void *blob, size_t len)
 int send_file(struct http_request_s *req, struct http_response_s *res)
 {
 	struct http_string_s t;
-	char *target;
 	char *s;
 	char *file_data;
+	char *mime_type;
+	size_t len;
+	char target[BUFLARGE];
 	char bbuf[BUFLARGE];
+
+#define DEFAULT_FILE ("index.html")
+
+	memset(target, 0, sizeof target);
+	memset(bbuf, 0, sizeof bbuf);
 
 	t = http_request_target(req);
 
-	target = strndup(t.buf, t.len);
+	strncpy(target, t.buf, t.len);
 
 	s = strstr(target, "..");
 	if (s) { // check for people being naughty?
-		free(target);
 		return -1;
 	}
 
-	snprintf(bbuf, sizeof bbuf, "html/%s", target + 1);
+	if (strlen(target) == 1) {
+		strncpy(target, DEFAULT_FILE, sizeof target);
+	}
 
-	printf("accessing file: %s\n", bbuf);
+	s = target;
+
+	if (s[0] == '/') {
+		s++;
+	}
+
+	snprintf(bbuf, sizeof bbuf, "html/%s", s);
 
 	if (access(bbuf, F_OK) == 0) {
-		file_data = sys_readfile(bbuf, NULL);
+		file_data = sys_readfile(bbuf, &len);
+
+		mime_type = (char *)magic_buffer(MAGIC_COOKIE, file_data, len);
 
 		http_response_status(res, 200);
-		http_response_header(res, "Content-Type", "plain/text");
-		http_response_body(res, file_data, strlen(file_data));
+		http_response_header(res, "Content-Type", mime_type);
+		http_response_body(res, file_data, len);
 
 		http_respond(req, res);
 
@@ -243,8 +257,6 @@ int send_file(struct http_request_s *req, struct http_response_s *res)
 	} else {
 		send_error(req, res, 404);
 	}
-
-	free(target);
 
 	return 0;
 }
@@ -277,7 +289,7 @@ int send_paste(struct http_request_s *req, struct http_response_s *res, char *id
 
 	http_response_status(res, 200);
 	http_response_header(res, "Content-Length", slen);
-	http_response_header(res, "Content-Type", "text/plain");
+	http_response_header(res, "Content-Type", type);
 	http_response_body(res, blob, len);
 
 	http_respond(req, res);

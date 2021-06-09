@@ -1,0 +1,48 @@
+<head>
+	<link rel="stylesheet" href="https://chrzanowski.me/style.css"/>
+    <link rel="shortcut icon" href="https://chrzanowski.me/favicon.ico"/>
+    <title>paste.chrzanowski</title>
+    <meta name="description" content="brian's own pastebin">
+</head>
+
+<body>
+
+<center>
+<div style="display: inline-block; vertical-align:middle;">
+	<h3><a style="text-decoration:none" href="/">Brian's Pastebin</a></h3>
+</div>
+</center>
+
+<br>
+
+<h3>Instructions</h3>
+
+<p>
+This is a simple pastebin website. Using <code>curl</code>, or any other method
+to POST some data to <code>/upload</code>, the response is a URL you can use to
+send that data elsewhere.
+</p>
+
+<h3>Example</h3>
+
+<pre><code>#!/usr/bin/env bash
+# Brian Chrzanowski
+# a small `upload` utility
+
+[ $# -ge 1 -a -f "$1" ] && input="$1" || input="-"
+cat $input | curl --data-binary @- https://paste.chrzanowski.me/upload
+</code></pre>
+
+<h3>Links</h3>
+
+<p>
+<a href="https://github.com/brimonk/pastebin">GH Source</a>
+
+<br>
+
+If you find any bugs, or innappropriate content in the pastebin, feel free to send me an email
+at: chrzanowskitest at gmail dot com.
+</p>
+
+</body>
+
