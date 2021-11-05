@@ -344,13 +344,13 @@ int main() {
 // *** macro definitions
 
 // Application configurable
-#define HTTP_REQUEST_BUF_SIZE 1024
+#define HTTP_REQUEST_BUF_SIZE (1024 * 1024)
 #define HTTP_RESPONSE_BUF_SIZE 1024
 #define HTTP_REQUEST_TIMEOUT 20
 #define HTTP_KEEP_ALIVE_TIMEOUT 120
 #define HTTP_MAX_TOKEN_LENGTH 8192 // 8kb
 #define HTTP_MAX_TOTAL_EST_MEM_USAGE 4294967296 // 4gb
-#define HTTP_MAX_REQUEST_BUF_SIZE 8388608 // 8mb
+#define HTTP_MAX_REQUEST_BUF_SIZE (16 * 1024 * 1024) // 16MB - Brian, updated for doom wads
 
 #define HTTP_MAX_HEADER_COUNT 127
 

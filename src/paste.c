@@ -249,6 +249,7 @@ int send_file(struct http_request_s *req, struct http_response_s *res)
 
 		http_response_status(res, 200);
 		http_response_header(res, "Content-Type", mime_type);
+		http_response_header(res, "Access-Control-Allow-Origin", "*");
 		http_response_body(res, file_data, len);
 
 		http_respond(req, res);
@@ -290,6 +291,7 @@ int send_paste(struct http_request_s *req, struct http_response_s *res, char *id
 	http_response_status(res, 200);
 	http_response_header(res, "Content-Length", slen);
 	http_response_header(res, "Content-Type", type);
+	http_response_header(res, "Access-Control-Allow-Origin", "*");
 	http_response_body(res, blob, len);
 
 	http_respond(req, res);
